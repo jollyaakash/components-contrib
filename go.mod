@@ -108,7 +108,7 @@ require (
 	github.com/sendgrid/sendgrid-go v3.5.0+incompatible
 	github.com/sergi/go-diff v1.2.0 // indirect
 	github.com/streadway/amqp v1.0.0
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.7.1
 	github.com/supplyon/gremcos v0.1.0
 	github.com/tidwall/gjson v1.8.0 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
@@ -126,7 +126,7 @@ require (
 	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f
 	google.golang.org/api v0.50.0
 	google.golang.org/genproto v0.0.0-20210831024726-fe130286e0e2
-	google.golang.org/grpc v1.40.0
+	google.golang.org/grpc v1.46.0
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/couchbase/gocbcore.v7 v7.1.18 // indirect
 	gopkg.in/couchbaselabs/gocbconnstr.v1 v1.0.4 // indirect
@@ -162,6 +162,7 @@ require (
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.0.87
 	github.com/labd/commercetools-go-sdk v0.3.2
 	github.com/nacos-group/nacos-sdk-go/v2 v2.0.1
+	github.com/spiffe/go-spiffe/v2 v2.1.0
 	gopkg.in/couchbase/gocb.v1 v1.6.4
 )
 
@@ -171,11 +172,13 @@ require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/internal v0.1.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v0.4.0 // indirect
+	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/appscode/go-querystring v0.0.0-20170504095604-0126cfb3f1dc // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/hashicorp/go-hclog v0.14.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.8 // indirect
+	github.com/zeebo/errs v1.2.2 // indirect
 	k8s.io/kube-openapi v0.0.0-20211115234752-e816edb12b65 // indirect
 	sigs.k8s.io/json v0.0.0-20211020170558-c049b76a60c6 // indirect
 )
@@ -314,7 +317,7 @@ require (
 	golang.org/x/tools v0.1.9 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.27.1 // indirect
+	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/fatih/pool.v2 v2.0.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
