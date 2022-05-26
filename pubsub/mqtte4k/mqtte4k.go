@@ -43,16 +43,18 @@ const (
 	mqttClientCert        = "clientCert"
 	mqttClientKey         = "clientKey"
 	mqttBackOffMaxRetries = "backOffMaxRetries"
+	mqttKeepAliveDuration = "keepAlive"
 
 	// errors.
 	errorMsgPrefix = "mqtte4k pub sub error:"
 
 	// Defaults.
-	defaultQOS              = 0
-	defaultRetain           = false
-	defaultWait             = 3 * time.Second
-	defaultCleanSession     = true
-	defaultSpiffeSocketPath = "/run/iotedge/sockets/workloadapi.sock"
+	defaultQOS               = 0
+	defaultRetain            = false
+	defaultWait              = 3 * time.Second
+	defaultCleanSession      = true
+	defaultKeepAliveDuration = 1000
+	defaultSpiffeSocketPath  = "/run/iotedge/sockets/workloadapi.sock"
 
 	// Spiffe keys.
 	spiffeSocketPath = "spiffeSocketPath"
@@ -128,6 +130,15 @@ func parseMQTTMetaData(md pubsub.Metadata) (*metadata, error) {
 		m.backOffMaxRetries = backOffMaxRetriesInt
 	}
 
+	m.keepAliveDuration = defaultKeepAliveDuration
+	if val, ok := md.Properties[mqttKeepAliveDuration]; ok && val != "" {
+		keepAliveDurationInt, err := strconv.Atoi(val)
+		if err != nil {
+			return &m, fmt.Errorf("%s invalid keepAliveDuration %s, %s", errorMsgPrefix, val, err)
+		}
+		m.keepAliveDuration = keepAliveDurationInt
+	}
+
 	// optional configuration settings
 	m.spiffeSocketPath = defaultSpiffeSocketPath
 	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
@@ -158,6 +169,7 @@ func initSpiffeWorkloadApi(m *mqttPubSub) {
 	}
 
 	m.svid = svid
+	m.logger.Debug("mqtte4k got a SPIFFE svid for: ", m.metadata.clientID)
 }
 
 // Init parses metadata and creates a new Pub Sub client.
@@ -170,8 +182,6 @@ func (m *mqttPubSub) Init(metadata pubsub.Metadata) error {
 
 	initSpiffeWorkloadApi(m)
 
-	// mqtt broker allows only one connection at a given time from a clientID.
-	m.logger.Debug("%s-producer: ", m.metadata.clientID)
 	p, err := m.connect()
 	if err != nil {
 		return err
@@ -185,6 +195,8 @@ func (m *mqttPubSub) Init(metadata pubsub.Metadata) error {
 
 	m.client = p
 	m.topics = make(map[string]byte)
+	// mqtt broker allows only one connection at a given time from a clientID.
+	m.logger.Debug("mqtte4k Init completed for : ", m.metadata.clientID)
 	return nil
 }
 
@@ -267,6 +279,7 @@ func (m *mqttPubSub) createClientOptions(uri *url.URL) *mqtt.ClientOptions {
 	opts.SetClientID(m.svid.ID.String())
 	opts.SetCleanSession(m.metadata.cleanSession)
 	opts.AddBroker(uri.String())
+	opts.SetKeepAlive(time.Duration(m.metadata.keepAliveDuration) * time.Second)
 	opts.SetUsername(m.svid.ID.String())
 	opts.SetPassword(m.svid.Marshal())
 	return opts
