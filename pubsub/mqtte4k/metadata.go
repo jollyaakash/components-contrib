@@ -20,6 +20,7 @@ type metadata struct {
 	retain            bool
 	cleanSession      bool
 	backOffMaxRetries int
-	keepAliveDuration int
+	keepAliveDuration uint16
 	spiffeSocketPath  string
+	spiffeBrokerAudience string
 }

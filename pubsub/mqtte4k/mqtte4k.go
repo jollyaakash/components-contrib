@@ -16,12 +16,12 @@ package mqtte4k
 import (
 	"context"
 	"fmt"
-	"net/url"
+	"net"
 	"strconv"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+	mqtt "github.com/eclipse/paho.golang/paho"
 
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
@@ -54,15 +54,18 @@ const (
 	defaultWait              = 3 * time.Second
 	defaultCleanSession      = true
 	defaultKeepAliveDuration = 1000
-	defaultSpiffeSocketPath  = "/run/iotedge/sockets/workloadapi.sock"
+	defaultSpiffeSocketPath  = "/run/azedge/sockets/workloadapi.sock"
+	defaultSpiffeBrokerAudience  = "spiffe://iotedge/mqttbroker"
+
 
 	// Spiffe keys.
 	spiffeSocketPath = "spiffeSocketPath"
+	spiffeBrokerAudience = "spiffeBrokerAudience"
 )
 
 // mqttPubSub type allows sending and receiving data to/from MQTT broker.
 type mqttPubSub struct {
-	client   mqtt.Client
+	client   *mqtt.Client
 	metadata *metadata
 	logger   logger.Logger
 	topics   map[string]byte
@@ -136,15 +139,21 @@ func parseMQTTMetaData(md pubsub.Metadata) (*metadata, error) {
 		if err != nil {
 			return &m, fmt.Errorf("%s invalid keepAliveDuration %s, %s", errorMsgPrefix, val, err)
 		}
-		m.keepAliveDuration = keepAliveDurationInt
+		m.keepAliveDuration = uint16(keepAliveDurationInt)
 	}
 
-	// optional configuration settings
 	m.spiffeSocketPath = defaultSpiffeSocketPath
 	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
 		m.spiffeSocketPath = val
 	} else {
 		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
+	}
+
+	m.spiffeBrokerAudience = defaultSpiffeBrokerAudience
+	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
+		m.spiffeBrokerAudience = val
+	} else {
+		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
 	}
 
 	return &m, nil
@@ -154,7 +163,7 @@ func initSpiffeWorkloadApi(m *mqttPubSub) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	serverID := spiffeid.RequireFromString("spiffe://iotedge/mqttbroker")
+	serverID := spiffeid.RequireFromString(m.metadata.spiffeBrokerAudience)
 
 	svid, err := workloadapi.FetchJWTSVID(
 		ctx,
@@ -203,10 +212,18 @@ func (m *mqttPubSub) Init(metadata pubsub.Metadata) error {
 // Publish the topic to mqtt pub sub.
 func (m *mqttPubSub) Publish(req *pubsub.PublishRequest) error {
 	m.logger.Debugf("mqtte4k publishing topic %s with data: %v", req.Topic, req.Data)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
 
-	token := m.client.Publish(req.Topic, m.metadata.qos, m.metadata.retain, req.Data)
-	if !token.WaitTimeout(defaultWait) || token.Error() != nil {
-		return fmt.Errorf("mqtte4k error from publish: %v", token.Error())
+	if _, err := m.client.Publish(ctx, &mqtt.Publish {
+		Topic: req.Topic,
+		QoS: m.metadata.qos,
+		Retain: m.metadata.retain,
+		Payload: []byte(req.Data),
+	}); err != nil {
+		m.logger.Debugf("mqtte4k error sending message on topic %s with data: %v", req.Topic, req.Data)
+		m.logger.Debugf("Error: %s", err.Error())
+		return err
 	}
 
 	return nil
@@ -218,78 +235,101 @@ func (m *mqttPubSub) Subscribe(req pubsub.SubscribeRequest, handler pubsub.Handl
 	m.topics[req.Topic] = m.metadata.qos
 
 	go func() {
-		token := m.client.SubscribeMultiple(
-			m.topics,
-			func(client mqtt.Client, mqttMsg mqtt.Message) {
-				mqttMsg.AutoAckOff()
-				msg := pubsub.NewMessage{
-					Topic: mqttMsg.Topic(),
-					Data:  mqttMsg.Payload(),
-				}
+		m.client.Router = mqtt.NewSingleHandlerRouter(func(mqttMsg *mqtt.Publish) {
+			msg := pubsub.NewMessage{
+				Topic: mqttMsg.Topic,
+				Data:  mqttMsg.Payload,
+			}
 
-				b := m.backOff
-				if m.metadata.backOffMaxRetries >= 0 {
-					b = backoff.WithMaxRetries(m.backOff, uint64(m.metadata.backOffMaxRetries))
+			b := m.backOff
+			if m.metadata.backOffMaxRetries >= 0 {
+				b = backoff.WithMaxRetries(m.backOff, uint64(m.metadata.backOffMaxRetries))
+			}
+			if err := retry.NotifyRecover(func() error {
+				m.logger.Debugf("mqtte4k Processing MQTTE4K message %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
+				if err := handler(m.ctx, &msg); err != nil {
+					return err
 				}
-				if err := retry.NotifyRecover(func() error {
-					m.logger.Debugf("Processing MQTTE4K message %s/%d", mqttMsg.Topic(), mqttMsg.MessageID())
-					if err := handler(m.ctx, &msg); err != nil {
-						return err
-					}
+				m.client.Ack(mqttMsg)
+				return nil
+			}, b, func(err error, d time.Duration) {
+				m.logger.Errorf("mqtte4k Error processing MQTTE4K message: %s/%d. Retrying...", mqttMsg.Topic, mqttMsg.PacketID)
+			}, func() {
+				m.logger.Debugf("mqtte4k Successfully processed MQTTE4K message after it previously failed: %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
+			}); err != nil {
+				m.logger.Errorf("mqtte4k Failed processing MQTTE4K message: %s/%d: %v", mqttMsg.Topic, mqttMsg.PacketID, err)
+			}})
 
-					mqttMsg.Ack()
-
-					return nil
-				}, b, func(err error, d time.Duration) {
-					m.logger.Errorf("Error processing MQTTE4K message: %s/%d. Retrying...", mqttMsg.Topic(), mqttMsg.MessageID())
-				}, func() {
-					m.logger.Infof("Successfully processed MQTTE4K message after it previously failed: %s/%d", mqttMsg.Topic(), mqttMsg.MessageID())
-				}); err != nil {
-					m.logger.Errorf("Failed processing MQTTE4K message: %s/%d: %v", mqttMsg.Topic(), mqttMsg.MessageID(), err)
-				}
-			},
-		)
-		if err := token.Error(); err != nil {
-			m.logger.Errorf("mqtte4k error from subscribe: %v", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		sub_map := make(map[string]mqtt.SubscribeOptions)
+		for topic, qos := range m.topics {
+			sub_map[topic] = mqtt.SubscribeOptions{ QoS: qos}
 		}
+		suback, err := m.client.Subscribe(ctx, &mqtt.Subscribe {
+			Subscriptions: sub_map,
+		},)
+
+		if err != nil {
+			m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+			m.logger.Errorf("mqtte4k Failed to subscribe: %s", err)
+		}
+		
 	}()
 
 	return nil
 }
 
-func (m *mqttPubSub) connect() (mqtt.Client, error) {
-	uri, err := url.Parse(m.metadata.url)
+func (m *mqttPubSub) connect() (*mqtt.Client, error) {
+	conn, err := net.Dial("tcp", m.metadata.url)
 	if err != nil {
-		return nil, err
-	}
-	opts := m.createClientOptions(uri)
-	client := mqtt.NewClient(opts)
-	token := client.Connect()
-	for !token.WaitTimeout(defaultWait) {
-	}
-	if err := token.Error(); err != nil {
+		m.logger.Debugf("mqtte4k Failed to connect to tcp://%s", m.metadata.url)
 		return nil, err
 	}
 
-	return client, nil
+	c := mqtt.NewClient(mqtt.ClientConfig{
+		Conn: conn,
+		EnableManualAcknowledgment : false,
+	})
+
+	cp := m.createClientOptions()
+	cp.UsernameFlag = true
+	cp.PasswordFlag = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	ca, err := c.Connect(ctx, cp)
+	if err != nil {
+		m.logger.Debugf(err.Error())
+		return nil, err
+	}
+
+	if ca.ReasonCode != 0 {
+		m.logger.Debugf("mqtte4k Failed to connect to %s : %d - %s", m.metadata.url, ca.ReasonCode, ca.Properties.ReasonString)
+		return nil, err
+	}
+
+	return c, nil
 }
 
-func (m *mqttPubSub) createClientOptions(uri *url.URL) *mqtt.ClientOptions {
-	opts := mqtt.NewClientOptions()
-	opts.SetClientID(m.svid.ID.String())
-	opts.SetCleanSession(m.metadata.cleanSession)
-	opts.AddBroker(uri.String())
-	opts.SetKeepAlive(time.Duration(m.metadata.keepAliveDuration) * time.Second)
-	opts.SetUsername(m.svid.ID.String())
-	opts.SetPassword(m.svid.Marshal())
-	return opts
+func (m *mqttPubSub) createClientOptions() *mqtt.Connect {
+	cp := &mqtt.Connect{
+		KeepAlive:  m.metadata.keepAliveDuration,
+		ClientID:   m.svid.ID.String(),
+		CleanStart: m.metadata.cleanSession,
+		Username:   m.svid.ID.String(),
+		Password:   []byte(m.svid.Marshal()),
+	}
+	return cp
 }
 
 func (m *mqttPubSub) Close() error {
 	m.cancel()
 
 	if m.client != nil {
-		m.client.Disconnect(100)
+		d := &mqtt.Disconnect{ReasonCode: 0}
+		m.client.Disconnect(d)
 	}
 
 	return nil
