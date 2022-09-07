@@ -41,8 +41,6 @@ const (
 	mqttRetain            = "retain"
 	mqttClientID          = "consumerID"
 	mqttCleanSession      = "cleanSession"
-	mqttCACert            = "caCert"
-	mqttClientCert        = "clientCert"
 	mqttClientKey         = "clientKey"
 	mqttBackOffMaxRetries = "backOffMaxRetries"
 	mqttKeepAliveDuration = "keepAlive"
@@ -53,9 +51,6 @@ const (
 	defaultWait              = 3 * time.Second
 	defaultCleanSession      = true
 	defaultKeepAliveDuration = 30
-	defaultSpiffeSocketPath  = "/run/azedge/sockets/workloadapi.sock"
-	defaultSpiffeBrokerAudience  = "spiffe://iotedge/mqttbroker"
-
 
 	// Spiffe keys.
 	spiffeSocketPath = "spiffeSocketPath"
@@ -123,14 +118,12 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 		m.keepAliveDuration = uint16(keepAliveDurationInt)
 	}
 
-	m.spiffeSocketPath = defaultSpiffeSocketPath
 	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
 		m.spiffeSocketPath = val
 	} else {
 		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
 	}
 
-	m.spiffeBrokerAudience = defaultSpiffeBrokerAudience
 	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
 		m.spiffeBrokerAudience = val
 	} else {

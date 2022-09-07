@@ -116,7 +116,7 @@ func (m *mqttPubSub) Publish(req *pubsub.PublishRequest) error {
 	// m.logger.Debugf("mqtt publishing topic %s with data: %v", req.Topic, req.Data)
 	m.logger.Debugf("mqtt publishing topic %s", req.Topic)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if _, err := m.client.Publish(ctx, &mqtt.Publish {
