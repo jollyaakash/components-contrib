@@ -48,6 +48,7 @@ const (
 
 	// errors.
 	errorMsgPrefix = "e4k statestore error:"
+	mqttResponseTimeout = 200
 )
 
 // StateStore Type.
@@ -261,16 +262,21 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 	select {
 	case res := <-r.responsesChannel:
 		if res.Properties.User.Get("STATUS") == "error" {
-			error_log := fmt.Sprintf("e4k state store Error in Deleting Key: %s, Message: %s", req.Key, res.Properties.User.Get("MESSAGE"))
-			r.logger.Debugf(error_log)
-			err := errors.New(error_log)
-			return err
+			if res.Properties.User.Get("MESSAGE") == "Key not found" {
+				r.logger.Debugf("e4k state store Key: %s not found", req.Key)
+				return nil
+			} else {
+				error_log := fmt.Sprintf("e4k state store Error in Deleting Key: %s, Message: %s", req.Key, res.Properties.User.Get("MESSAGE"))
+				r.logger.Debugf(error_log)
+				err := errors.New(error_log)
+				return err
+			}
 		}
-
-		r.logger.Debugf("e4k state store Delete successful for: %s", req.Key)
-		return nil
-	case <-time.After(10 * time.Second):
-		r.logger.Debugf("e4k state store Delete unsuccessful for: %s, Key might be not present or E4K broker is slow", req.Key)
+	case <-time.After(mqttResponseTimeout * time.Second):
+		error_log := fmt.Sprintf("e4k state store Delete unsuccessful for: %s, Key might be not present or E4K broker is slow", req.Key)
+		r.logger.Debugf(error_log)
+		err := errors.New(error_log)
+		return err
 	}
 
 	r.logger.Debugf("e4k state store Delete successful for: %s", req.Key)
@@ -310,23 +316,29 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	// Waiting for Request-Response to come back
 	select {
 	case res := <-r.responsesChannel:
-
 		if res.Properties.User.Get("STATUS") == "error" {
-			error_log := fmt.Sprintf("e4k state store Error in Getting Key: %s, Message: %s", req.Key, res.Properties.User.Get("MESSAGE"))
-			r.logger.Debugf(error_log)
-			err := errors.New(error_log)
-			return nil, err
+			if res.Properties.User.Get("MESSAGE") == "Key not found" {
+				r.logger.Debugf("e4k state store Get Key: %s not found", req.Key)
+			} else {
+				error_log := fmt.Sprintf("e4k state store Error in Getting Key: %s, Message: %s", req.Key, res.Properties.User.Get("MESSAGE"))
+				r.logger.Debugf(error_log)
+				err := errors.New(error_log)
+				return nil, err
+			}
+		} else {
+			r.logger.Debugf("e4k state store Get successful for: %s", req.Key)
+
+			return &state.GetResponse{
+				Data:        res.Payload,
+				ETag:        nil,
+				ContentType: &res.Properties.ContentType,
+			}, nil
 		}
-
-		r.logger.Debugf("e4k state store Get successful for: %s", req.Key)
-
-		return &state.GetResponse{
-			Data:        res.Payload,
-			ETag:        nil,
-			ContentType: &res.Properties.ContentType,
-		}, nil
-	case <-time.After(10 * time.Second):
-		r.logger.Debugf("e4k state store Get unsuccessful for: %s, Key might be not present or E4K broker is slow", req.Key)
+	case <-time.After(mqttResponseTimeout * time.Second):
+		error_log := fmt.Sprintf("e4k state store Get unsuccessful for: %s, Key might be not present or E4K broker is slow", req.Key)
+		r.logger.Debugf(error_log)
+		err := errors.New(error_log)
+		return nil, err
 	}
 
 	return &state.GetResponse{}, nil
@@ -382,11 +394,11 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 			err := errors.New(error_log)
 			return err
 		}
-
-		r.logger.Debugf("e4k state store Set successful for: %s", req.Key)
-		return nil
-	case <-time.After(10 * time.Second):
-		r.logger.Debugf("e4k state store Set unsuccessful for: %s, Key might be not present or E4K broker is slow", req.Key)
+	case <-time.After(mqttResponseTimeout * time.Second):
+		error_log := fmt.Sprintf("e4k state store Set Key unsuccessful for: %s, internal error or E4K broker is slow", req.Key)
+		r.logger.Debugf(error_log)
+		err := errors.New(error_log)
+		return err
 	}
 
 	r.logger.Debugf("e4k state store Set successful for: %s", req.Key)

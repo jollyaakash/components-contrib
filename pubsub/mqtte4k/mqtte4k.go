@@ -147,48 +147,45 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 	m.logger.Debugf("mqtte4k Subscribe request for topic: %s, for Consumer: %s", req.Topic, m.metadata.clientID)
 	m.topics[req.Topic] = m.metadata.qos
 
-	go func() {
-		m.client.Router = mqtt.NewSingleHandlerRouter(func(mqttMsg *mqtt.Publish) {
-			msg := pubsub.NewMessage{
-				Topic: mqttMsg.Topic,
-				Data:  mqttMsg.Payload,
-			}
-
-			b := m.backOff
-			if m.metadata.backOffMaxRetries >= 0 {
-				b = backoff.WithMaxRetries(m.backOff, uint64(m.metadata.backOffMaxRetries))
-			}
-			if err := retry.NotifyRecover(func() error {
-				m.logger.Debugf("mqtte4k Processing MQTTE4K message %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
-				if err := handler(m.ctx, &msg); err != nil {
-					return err
-				}
-				m.client.Ack(mqttMsg)
-				return nil
-			}, b, func(err error, d time.Duration) {
-				m.logger.Errorf("mqtte4k Error processing MQTTE4K message: %s/%d. Retrying...", mqttMsg.Topic, mqttMsg.PacketID)
-			}, func() {
-				m.logger.Debugf("mqtte4k Successfully processed MQTTE4K message after it previously failed: %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
-			}); err != nil {
-				m.logger.Errorf("mqtte4k Failed processing MQTTE4K message: %s/%d: %v", mqttMsg.Topic, mqttMsg.PacketID, err)
-			}})
-
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		sub_map := make(map[string]mqtt.SubscribeOptions)
-		for topic, qos := range m.topics {
-			sub_map[topic] = mqtt.SubscribeOptions{ QoS: qos}
+	m.client.Router = mqtt.NewSingleHandlerRouter(func(mqttMsg *mqtt.Publish) {
+		msg := pubsub.NewMessage{
+			Topic: mqttMsg.Topic,
+			Data:  mqttMsg.Payload,
 		}
-		suback, err := m.client.Subscribe(ctx, &mqtt.Subscribe {
-			Subscriptions: sub_map,
-		},)
 
-		if err != nil {
-			m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
-			m.logger.Errorf("mqtte4k Failed to subscribe: %s", err)
+		b := m.backOff
+		if m.metadata.backOffMaxRetries >= 0 {
+			b = backoff.WithMaxRetries(m.backOff, uint64(m.metadata.backOffMaxRetries))
 		}
-		
-	}()
+		if err := retry.NotifyRecover(func() error {
+			m.logger.Debugf("mqtte4k Processing MQTTE4K message %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
+			if err := handler(m.ctx, &msg); err != nil {
+				return err
+			}
+			m.client.Ack(mqttMsg)
+			return nil
+		}, b, func(err error, d time.Duration) {
+			m.logger.Errorf("mqtte4k Error processing MQTTE4K message: %s/%d. Retrying...", mqttMsg.Topic, mqttMsg.PacketID)
+		}, func() {
+			m.logger.Debugf("mqtte4k Successfully processed MQTTE4K message after it previously failed: %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
+		}); err != nil {
+			m.logger.Errorf("mqtte4k Failed processing MQTTE4K message: %s/%d: %v", mqttMsg.Topic, mqttMsg.PacketID, err)
+		}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	sub_map := make(map[string]mqtt.SubscribeOptions)
+	for topic, qos := range m.topics {
+		sub_map[topic] = mqtt.SubscribeOptions{ QoS: qos}
+	}
+	suback, err := m.client.Subscribe(ctx, &mqtt.Subscribe {
+		Subscriptions: sub_map,
+	},)
+
+	if err != nil {
+		m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+		m.logger.Errorf("mqtte4k Failed to subscribe: %s", err)
+	}
 
 	return nil
 }
