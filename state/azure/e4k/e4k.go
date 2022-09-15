@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"crypto/md5"
+    "encoding/hex"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dapr/components-contrib/state"
@@ -146,9 +148,10 @@ func (r *StateStore) connect() (*mqtt.Client, error) {
 }
 
 func (r *StateStore) createClientOptions() *mqtt.Connect {
+
 	cp := &mqtt.Connect{
 		KeepAlive:  r.metadata.keepAliveDuration,
-		ClientID:   r.svid.ID.String(),
+		ClientID:   getMD5HashClientID(r.svid.ID.String()),
 		CleanStart: r.metadata.cleanSession,
 		Username:   r.svid.ID.String(),
 		Password:   []byte(r.svid.Marshal()),
@@ -517,4 +520,10 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 	}
 
 	return &m, nil
+}
+
+func getMD5HashClientID(clientId string) string {
+	text := clientId + os.Getenv("POD_NAME")
+	hash := md5.Sum([]byte(text))
+	return hex.EncodeToString(hash[:])
 }

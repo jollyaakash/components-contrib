@@ -14,10 +14,13 @@ limitations under the License.
 package mqtte4k
 
 import (
+	"os"
 	"context"
 	"errors"
 	"net"
 	"time"
+    "crypto/md5"
+    "encoding/hex"
 
 	"github.com/cenkalti/backoff/v4"
 	mqtt "github.com/eclipse/paho.golang/paho"
@@ -145,9 +148,12 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 	}
 
 	m.logger.Debugf("mqtte4k Subscribe request for topic: %s, for Consumer: %s", req.Topic, m.metadata.clientID)
-	m.topics[req.Topic] = m.metadata.qos
 
-	m.client.Router = mqtt.NewSingleHandlerRouter(func(mqttMsg *mqtt.Publish) {
+	if m.client.Router == nil {
+		m.client.Router = mqtt.NewStandardRouter()
+	}
+
+	m.client.Router.RegisterHandler(req.Topic, func(mqttMsg *mqtt.Publish) {
 		msg := pubsub.NewMessage{
 			Topic: mqttMsg.Topic,
 			Data:  mqttMsg.Payload,
@@ -174,13 +180,12 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	sub_map := make(map[string]mqtt.SubscribeOptions)
-	for topic, qos := range m.topics {
-		sub_map[topic] = mqtt.SubscribeOptions{ QoS: qos}
-	}
-	suback, err := m.client.Subscribe(ctx, &mqtt.Subscribe {
-		Subscriptions: sub_map,
-	},)
+
+	suback, err := m.client.Subscribe(ctx, &mqtt.Subscribe{
+		Subscriptions: map[string]mqtt.SubscribeOptions{
+			req.Topic: {QoS: m.metadata.qos},
+		},
+	})
 
 	if err != nil {
 		m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
@@ -226,7 +231,7 @@ func (m *mqttPubSub) connect() (*mqtt.Client, error) {
 func (m *mqttPubSub) createClientOptions() *mqtt.Connect {
 	cp := &mqtt.Connect{
 		KeepAlive:  m.metadata.keepAliveDuration,
-		ClientID:   m.svid.ID.String(),
+		ClientID:   getMD5HashClientID(m.svid.ID.String()),
 		CleanStart: m.metadata.cleanSession,
 		Username:   m.svid.ID.String(),
 		Password:   []byte(m.svid.Marshal()),
@@ -247,4 +252,10 @@ func (m *mqttPubSub) Close() error {
 
 func (m *mqttPubSub) Features() []pubsub.Feature {
 	return nil
+}
+
+func getMD5HashClientID(clientId string) string {
+	text := clientId + os.Getenv("POD_NAME")
+	hash := md5.Sum([]byte(text))
+	return hex.EncodeToString(hash[:])
 }
