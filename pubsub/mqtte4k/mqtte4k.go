@@ -257,5 +257,6 @@ func (m *mqttPubSub) Features() []pubsub.Feature {
 func getMD5HashClientID(clientId string) string {
 	text := clientId + os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
-	return hex.EncodeToString(hash[:])
+	hexString := hex.EncodeToString(hash[:])
+	return hexString[:23]
 }

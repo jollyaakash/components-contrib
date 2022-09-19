@@ -253,6 +253,7 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 
 	if _, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
+		QoS: r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
@@ -308,6 +309,7 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 
 	if _, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
+		QoS: r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
@@ -380,6 +382,7 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 
 	if _, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
+		QoS: r.metadata.qos,
 		Payload:    r.marshal(req),
 		Properties: props,
 	}); err != nil {
@@ -483,25 +486,6 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
 
-	// optional configuration settings
-	m.qos = defaultQOS
-	if val, ok := md.Properties[mqttQOS]; ok && val != "" {
-		qosInt, err := strconv.Atoi(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid qos %s, %s", errorMsgPrefix, val, err)
-		}
-		m.qos = byte(qosInt)
-	}
-
-	m.retain = defaultRetain
-	if val, ok := md.Properties[mqttRetain]; ok && val != "" {
-		var err error
-		m.retain, err = strconv.ParseBool(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid retain %s, %s", errorMsgPrefix, val, err)
-		}
-	}
-
 	topic_suffix := defaultMqttResponseTopicPrefix
 	if val, ok := md.Properties[mqttResponseTopicPrefix]; ok && val != "" {
 		topic_suffix = val
@@ -510,20 +494,12 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 	responseTopic := pod_name + "/" + topic_suffix
 	m.responseTopic = strings.ToLower(responseTopic)
 
-	m.cleanSession = defaultCleanSession
-	if val, ok := md.Properties[mqttCleanSession]; ok && val != "" {
-		var err error
-		m.cleanSession, err = strconv.ParseBool(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid cleanSession %s, %s", errorMsgPrefix, val, err)
-		}
-	}
-
 	return &m, nil
 }
 
 func getMD5HashClientID(clientId string) string {
 	text := clientId + os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
-	return hex.EncodeToString(hash[:])
+	hexString := hex.EncodeToString(hash[:])
+	return hexString[:23]
 }
