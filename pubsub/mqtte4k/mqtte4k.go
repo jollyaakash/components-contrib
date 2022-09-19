@@ -129,7 +129,7 @@ func (m *mqttPubSub) Publish(req *pubsub.PublishRequest) error {
 		Payload: []byte(req.Data),
 	}); err != nil {
 		m.logger.Debugf("mqtte4k error sending message on topic %s with data: %v", req.Topic, req.Data)
-		m.logger.Debugf("mqtte4k error PubAck - Reason: %d, ReasonString: %s ", puback.ReasonCode, puback.Properties.ReasonString)
+		m.logger.Debugf("mqtte4k error PubAck - Reason: %d", puback.ReasonCode)
 		m.logger.Debugf("Error: %s", err.Error())
 		return err
 	}
