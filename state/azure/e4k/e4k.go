@@ -251,13 +251,14 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 	r.correlationMap[correlation_string] = true
 	props.CorrelationData = []byte(correlation_string)
 
-	if _, err := r.client.Publish(ctx, &mqtt.Publish{
+	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
 		QoS: r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
+		r.logger.Debugf("e4k state error PubAck - Reason: %d, ReasonString: %s ", puback.ReasonCode, puback.Properties.ReasonString)
 		r.logger.Debugf("Error: %s", err.Error())
 		return err
 	}
@@ -307,13 +308,14 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	r.correlationMap[correlation_string] = true
 	props.CorrelationData = []byte(correlation_string)
 
-	if _, err := r.client.Publish(ctx, &mqtt.Publish{
+	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
 		QoS: r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
+		r.logger.Debugf("e4k state error PubAck - Reason: %d, ReasonString: %s ", puback.ReasonCode, puback.Properties.ReasonString)
 		r.logger.Debugf("Error: %s", err.Error())
 		return nil, err
 	}
@@ -380,13 +382,14 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 	r.correlationMap[correlation_string] = true
 	props.CorrelationData = []byte(correlation_string)
 
-	if _, err := r.client.Publish(ctx, &mqtt.Publish{
+	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
 		QoS: r.metadata.qos,
 		Payload:    r.marshal(req),
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
+		r.logger.Debugf("e4k state store error PubAck - Reason: %d, ReasonString: %s ", puback.ReasonCode, puback.Properties.ReasonString)
 		r.logger.Debugf("Error: %s", err.Error())
 		return err
 	}
