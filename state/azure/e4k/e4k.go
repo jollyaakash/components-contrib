@@ -258,7 +258,9 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
-		r.logger.Debugf("e4k state error PubAck - Reason: %d", puback.ReasonCode)
+		if puback != nil {
+			r.logger.Debugf("mqtte4k error PubAck - Reason: %d", puback.ReasonCode)
+		}
 		r.logger.Debugf("Error: %s", err.Error())
 		return err
 	}
@@ -315,7 +317,9 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
-		r.logger.Debugf("e4k state error PubAck - Reason: %d", puback.ReasonCode)
+		if puback != nil {
+			r.logger.Debugf("mqtte4k error PubAck - Reason: %d", puback.ReasonCode)
+		}
 		r.logger.Debugf("Error: %s", err.Error())
 		return nil, err
 	}
@@ -389,7 +393,9 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 		Properties: props,
 	}); err != nil {
 		r.logger.Debugf("e4k state store error sending message on topic %s", pub_topic)
-		r.logger.Debugf("e4k state store error PubAck - Reason: %d", puback.ReasonCode)
+		if puback != nil {
+			r.logger.Debugf("mqtte4k error PubAck - Reason: %d", puback.ReasonCode)
+		}
 		r.logger.Debugf("Error: %s", err.Error())
 		return err
 	}
