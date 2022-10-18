@@ -105,7 +105,7 @@ func (m *mqttPubSub) Init(metadata pubsub.Metadata) error {
 	m.client = p
 	m.topics = make(map[string]byte)
 	// mqtt broker allows only one connection at a given time from a clientID.
-	m.logger.Debug("mqtte4k Init completed for : ", m.metadata.clientID)
+	m.logger.Debug("mqtte4k Init completed for : ", m.metadata.clientIdPrefix)
 	return nil
 }
 
@@ -150,7 +150,7 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 		return errors.New("topic name is empty")
 	}
 
-	m.logger.Debugf("mqtte4k Subscribe request for topic: %s, for Consumer: %s", req.Topic, m.metadata.clientID)
+	m.logger.Debugf("mqtte4k Subscribe request for topic: %s, for Consumer: %s", req.Topic, m.metadata.clientIdPrefix)
 
 	if m.client.Router == nil {
 		m.client.Router = mqtt.NewStandardRouter()
@@ -238,7 +238,7 @@ func (m *mqttPubSub) connect() (*mqtt.Client, error) {
 func (m *mqttPubSub) createClientOptions() *mqtt.Connect {
 	cp := &mqtt.Connect{
 		KeepAlive:  m.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(m.metadata.clientID ,m.svid.ID.String()),
+		ClientID:   getMD5HashClientID(m.metadata.clientIdPrefix ,m.svid.ID.String()),
 		CleanStart: m.metadata.cleanSession,
 		Username:   m.svid.ID.String(),
 		Password:   []byte(m.svid.Marshal()),

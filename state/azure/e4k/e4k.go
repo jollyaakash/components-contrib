@@ -30,7 +30,7 @@ const (
 	mqttURL                 = "url"
 	mqttQOS                 = "mqttqos"
 	mqttRetain              = "retain"
-	mqttClientID            = "clientId"
+	mqttClientIdPrefix      = "clientIdPrefix"
 	mqttCleanSession        = "cleanSession"
 	mqttBackOffMaxRetries   = "backOffMaxRetries"
 	mqttKeepAliveDuration   = "keepAlive"
@@ -49,7 +49,7 @@ const (
 	spiffeBrokerAudience = "spiffeBrokerAudience"
 
 	// defaultClientID prefix 
-	clientIDPrefix = "e4kd-"
+	clientIdPrefix = "e4kd-"
 
 	// errors.
 	errorMsgPrefix = "e4k statestore error:"
@@ -74,7 +74,7 @@ type StateStore struct {
 
 type e4kMetadata struct {
 	url                  string
-	clientID             string
+	clientIdPrefix       string
 	qos                  byte
 	retain               bool
 	cleanSession         bool
@@ -154,7 +154,7 @@ func (r *StateStore) createClientOptions() *mqtt.Connect {
 
 	cp := &mqtt.Connect{
 		KeepAlive:  r.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(r.metadata.clientID ,r.svid.ID.String()),
+		ClientID:   getMD5HashClientID(r.metadata.clientIdPrefix ,r.svid.ID.String()),
 		CleanStart: r.metadata.cleanSession,
 		Username:   r.svid.ID.String(),
 		Password:   []byte(r.svid.Marshal()),
@@ -454,10 +454,10 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 
 	// optional configuration settings
 
-	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
-		m.clientID = val
+	if val, ok := md.Properties[mqttClientIdPrefix]; ok && val != "" {
+		m.clientIdPrefix = val
 	} else {
-		m.clientID = clientIDPrefix + uuid.New().String()
+		m.clientIdPrefix = clientIdPrefix + uuid.New().String()
 	}
 
 	m.qos = defaultQOS

@@ -25,7 +25,7 @@ import (
 
 type metadata struct {
 	url               string
-	clientID          string
+	clientIdPrefix    string
 	qos               byte
 	retain            bool
 	cleanSession      bool
@@ -40,7 +40,7 @@ const (
 	mqttURL               = "url"
 	mqttQOS               = "qos"
 	mqttRetain            = "retain"
-	mqttClientID          = "clientId"
+	mqttClientIdPrefix    = "clientIdPrefix"
 	mqttCleanSession      = "cleanSession"
 	mqttClientKey         = "clientKey"
 	mqttBackOffMaxRetries = "backOffMaxRetries"
@@ -58,7 +58,7 @@ const (
 	spiffeBrokerAudience = "spiffeBrokerAudience"
 
 	// defaultClientID prefix 
-	clientIDPrefix = "e4kd-"
+	clientIdPrefix = "e4kd-"
 )
 
 func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error) {
@@ -85,12 +85,12 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 
 	// optional configuration settings
 
-	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
-		m.clientID = val
+	if val, ok := md.Properties[mqttClientIdPrefix]; ok && val != "" {
+		m.clientIdPrefix = val
 	} else {
-		m.clientID = clientIDPrefix + uuid.New().String()
+		m.clientIdPrefix = clientIdPrefix + uuid.New().String()
 	}
-	
+
 	m.qos = defaultQOS
 	if val, ok := md.Properties[mqttQOS]; ok && val != "" {
 		qosInt, err := strconv.Atoi(val)
