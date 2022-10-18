@@ -78,7 +78,7 @@ func initSpiffeWorkloadApi(m *mqttPubSub) {
 	}
 
 	m.svid = svid
-	m.logger.Debugf("mqtte4k got a SPIFFE svid for mqtte4k component: %s with SVID id: %s", m.metadata.clientID, svid.ID.String())
+	m.logger.Debugf("mqtte4k got a SPIFFE SVID id: %s", svid.ID.String())
 }
 
 // Init parses metadata and creates a new Pub Sub client.

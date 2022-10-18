@@ -114,7 +114,7 @@ func initSpiffeWorkloadApi(r *StateStore) {
 	}
 
 	r.svid = svid
-	r.logger.Debugf("e4k state store got a SPIFFE svid for e4k component: %s with SVID id: %s", r.metadata.clientID, svid.ID.String())
+	r.logger.Debugf("e4k state store got a SPIFFE SVID id: %s", svid.ID.String())
 }
 
 func (r *StateStore) connect() (*mqtt.Client, error) {
