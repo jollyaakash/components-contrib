@@ -20,6 +20,7 @@ import (
 
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
+	"github.com/google/uuid"
 )
 
 type metadata struct {
@@ -39,7 +40,7 @@ const (
 	mqttURL               = "url"
 	mqttQOS               = "qos"
 	mqttRetain            = "retain"
-	mqttClientID          = "consumerID"
+	mqttClientID          = "clientId"
 	mqttCleanSession      = "cleanSession"
 	mqttClientKey         = "clientKey"
 	mqttBackOffMaxRetries = "backOffMaxRetries"
@@ -55,6 +56,9 @@ const (
 	// Spiffe keys.
 	spiffeSocketPath = "spiffeSocketPath"
 	spiffeBrokerAudience = "spiffeBrokerAudience"
+
+	// defaultClientID prefix 
+	clientIDPrefix = "e4kd-"
 )
 
 func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error) {
@@ -67,7 +71,26 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
 
+	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
+		m.spiffeSocketPath = val
+	} else {
+		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
+	}
+
+	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
+		m.spiffeBrokerAudience = val
+	} else {
+		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+	}
+
 	// optional configuration settings
+
+	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
+		m.clientID = val
+	} else {
+		m.clientID = clientIDPrefix + uuid.New().String()
+	}
+	
 	m.qos = defaultQOS
 	if val, ok := md.Properties[mqttQOS]; ok && val != "" {
 		qosInt, err := strconv.Atoi(val)
@@ -84,12 +107,6 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 		if err != nil {
 			return &m, fmt.Errorf("%s invalid retain %s, %s", errorMsgPrefix, val, err)
 		}
-	}
-
-	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
-		m.clientID = val
-	} else {
-		return &m, fmt.Errorf("%s missing consumerID", errorMsgPrefix)
 	}
 
 	m.cleanSession = defaultCleanSession
@@ -116,59 +133,6 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 			return &m, fmt.Errorf("%s invalid keepAliveDuration %s, %s", errorMsgPrefix, val, err)
 		}
 		m.keepAliveDuration = uint16(keepAliveDurationInt)
-	}
-
-	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
-		m.spiffeSocketPath = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
-	}
-
-	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
-		m.spiffeBrokerAudience = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
-	}
-
-	// required configuration settings
-	if val, ok := md.Properties[mqttURL]; ok && val != "" {
-		m.url = val
-	} else {
-		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
-	}
-
-	// optional configuration settings
-	m.qos = defaultQOS
-	if val, ok := md.Properties[mqttQOS]; ok && val != "" {
-		qosInt, err := strconv.Atoi(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid qos %s, %s", errorMsgPrefix, val, err)
-		}
-		m.qos = byte(qosInt)
-	}
-
-	m.retain = defaultRetain
-	if val, ok := md.Properties[mqttRetain]; ok && val != "" {
-		var err error
-		m.retain, err = strconv.ParseBool(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid retain %s, %s", errorMsgPrefix, val, err)
-		}
-	}
-
-	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
-		m.clientID = val
-	} else {
-		return &m, fmt.Errorf("%s missing consumerID", errorMsgPrefix)
-	}
-
-	m.cleanSession = defaultCleanSession
-	if val, ok := md.Properties[mqttCleanSession]; ok && val != "" {
-		var err error
-		m.cleanSession, err = strconv.ParseBool(val)
-		if err != nil {
-			return &m, fmt.Errorf("%s invalid cleanSession %s, %s", errorMsgPrefix, val, err)
-		}
 	}
 
 	return &m, nil

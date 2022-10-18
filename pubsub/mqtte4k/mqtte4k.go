@@ -78,7 +78,7 @@ func initSpiffeWorkloadApi(m *mqttPubSub) {
 	}
 
 	m.svid = svid
-	m.logger.Debug("mqtte4k got a SPIFFE svid for: ", m.metadata.clientID)
+	m.logger.Debugf("mqtte4k got a SPIFFE svid for mqtte4k component: %s with SVID id: %s", m.metadata.clientID, svid.ID.String())
 }
 
 // Init parses metadata and creates a new Pub Sub client.
@@ -191,8 +191,12 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 	})
 
 	if err != nil {
-		m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
-		m.logger.Errorf("mqtte4k Failed to subscribe: %s", err)
+		m.logger.Debugf("mqtte4k failed to subscribe to topic %s with qos: %v", req.Topic, m.metadata.qos)
+		m.logger.Debugf("mqtte4k failed to subscribe ERROR: %s", err.Error())
+		if(suback != nil) {
+			m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+		}
+		m.logger.Errorf("mqtte4k Error: %s", err.Error())
 	}
 
 	return nil
@@ -234,7 +238,7 @@ func (m *mqttPubSub) connect() (*mqtt.Client, error) {
 func (m *mqttPubSub) createClientOptions() *mqtt.Connect {
 	cp := &mqtt.Connect{
 		KeepAlive:  m.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(m.svid.ID.String()),
+		ClientID:   getMD5HashClientID(m.metadata.clientID ,m.svid.ID.String()),
 		CleanStart: m.metadata.cleanSession,
 		Username:   m.svid.ID.String(),
 		Password:   []byte(m.svid.Marshal()),
@@ -257,9 +261,16 @@ func (m *mqttPubSub) Features() []pubsub.Feature {
 	return nil
 }
 
-func getMD5HashClientID(clientId string) string {
-	text := clientId + os.Getenv("POD_NAME")
+func getMD5HashClientID(clientID string, svidID string) string {
+	text := svidID + os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
-	hexString := hex.EncodeToString(hash[:])
+
+	hexString := ""
+	if len(clientID) > 12 {
+		hexString = clientID[:12] + "-" + hex.EncodeToString(hash[:])
+	} else {
+		hexString = clientID + "-" + hex.EncodeToString(hash[:])
+	}
+
 	return hexString[:23]
 }

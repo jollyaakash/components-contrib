@@ -30,7 +30,7 @@ const (
 	mqttURL                 = "url"
 	mqttQOS                 = "mqttqos"
 	mqttRetain              = "retain"
-	mqttClientID            = "consumerID"
+	mqttClientID            = "clientId"
 	mqttCleanSession        = "cleanSession"
 	mqttBackOffMaxRetries   = "backOffMaxRetries"
 	mqttKeepAliveDuration   = "keepAlive"
@@ -47,6 +47,9 @@ const (
 	// Spiffe keys.
 	spiffeSocketPath     = "spiffeSocketPath"
 	spiffeBrokerAudience = "spiffeBrokerAudience"
+
+	// defaultClientID prefix 
+	clientIDPrefix = "e4kd-"
 
 	// errors.
 	errorMsgPrefix = "e4k statestore error:"
@@ -111,7 +114,7 @@ func initSpiffeWorkloadApi(r *StateStore) {
 	}
 
 	r.svid = svid
-	r.logger.Debug("e4k state store got a SPIFFE svid for: ", svid.ID.String())
+	r.logger.Debugf("e4k state store got a SPIFFE svid for e4k component: %s with SVID id: %s", r.metadata.clientID, svid.ID.String())
 }
 
 func (r *StateStore) connect() (*mqtt.Client, error) {
@@ -151,7 +154,7 @@ func (r *StateStore) createClientOptions() *mqtt.Connect {
 
 	cp := &mqtt.Connect{
 		KeepAlive:  r.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(r.svid.ID.String()),
+		ClientID:   getMD5HashClientID(r.metadata.clientID ,r.svid.ID.String()),
 		CleanStart: r.metadata.cleanSession,
 		Username:   r.svid.ID.String(),
 		Password:   []byte(r.svid.Marshal()),
@@ -187,8 +190,14 @@ func (r *StateStore) subscribeResponseTopic() error {
 	})
 
 	if err != nil {
-		r.logger.Debugf("e4k state store SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons, suback.Properties)
-		r.logger.Errorf("e4k state store Failed to subscribe: %s", err)
+		r.logger.Debugf("e4k state store failed to subscribe to response topic %s with qos: %v", r.metadata.responseTopic, r.metadata.qos)
+		r.logger.Debugf("e4k state store failed to subscribe ERROR: %s", err.Error())
+
+		if(suback != nil) {
+			r.logger.Debugf("e4k state store SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+		}
+		r.logger.Errorf("e4k state store Error: %s", err.Error())
+		return err
 	}
 
 	default_err = err
@@ -431,7 +440,26 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
 
+	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
+		m.spiffeSocketPath = val
+	} else {
+		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
+	}
+
+	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
+		m.spiffeBrokerAudience = val
+	} else {
+		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+	}
+
 	// optional configuration settings
+
+	if val, ok := md.Properties[mqttClientID]; ok && val != "" {
+		m.clientID = val
+	} else {
+		m.clientID = clientIDPrefix + uuid.New().String()
+	}
+
 	m.qos = defaultQOS
 	if val, ok := md.Properties[mqttQOS]; ok && val != "" {
 		qosInt, err := strconv.Atoi(val)
@@ -476,25 +504,6 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 		m.keepAliveDuration = uint16(keepAliveDurationInt)
 	}
 
-	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
-		m.spiffeSocketPath = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
-	}
-
-	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
-		m.spiffeBrokerAudience = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
-	}
-
-	// required configuration settings
-	if val, ok := md.Properties[mqttURL]; ok && val != "" {
-		m.url = val
-	} else {
-		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
-	}
-
 	topic_suffix := defaultMqttResponseTopicPrefix
 	if val, ok := md.Properties[mqttResponseTopicPrefix]; ok && val != "" {
 		topic_suffix = val
@@ -506,9 +515,16 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 	return &m, nil
 }
 
-func getMD5HashClientID(clientId string) string {
-	text := clientId + os.Getenv("POD_NAME")
+func getMD5HashClientID(clientID string, svidID string) string {
+	text := svidID + os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
-	hexString := hex.EncodeToString(hash[:])
+
+	hexString := ""
+	if len(clientID) > 12 {
+		hexString = clientID[:12] + "-" + hex.EncodeToString(hash[:])
+	} else {
+		hexString = clientID + "-" + hex.EncodeToString(hash[:])
+	}
+
 	return hexString[:23]
 }
