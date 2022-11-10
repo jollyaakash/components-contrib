@@ -14,13 +14,13 @@ limitations under the License.
 package mqtte4k
 
 import (
-	"os"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"net"
+	"os"
 	"time"
-    "crypto/md5"
-    "encoding/hex"
 
 	"github.com/cenkalti/backoff/v4"
 	mqtt "github.com/eclipse/paho.golang/paho"
@@ -42,21 +42,35 @@ const (
 // mqttPubSub type allows sending and receiving data to/from MQTT broker.
 type mqttPubSub struct {
 	client   *mqtt.Client
+	auth     *mqtt.ClientConfig
 	metadata *metadata
 	logger   logger.Logger
 	topics   map[string]byte
 
-	ctx     context.Context
-	cancel  context.CancelFunc
-	backOff backoff.BackOff
-	svid    *jwtsvid.SVID
+	ctx      context.Context
+	cancel   context.CancelFunc
+	backOff  backoff.BackOff
+	svid     *jwtsvid.SVID
+	satToken string
 }
 
 // NewMQTTPubSub returns a new mqttPubSub instance.
 func NewMQTTE4KPubSub(logger logger.Logger) pubsub.PubSub {
 	return &mqttPubSub{
-		logger:          logger,
+		logger: logger,
 	}
+}
+
+func populateSATPassword(m *mqttPubSub) {
+	token, err := os.ReadFile(m.metadata.satTokenPath)
+	if err != nil {
+		panic(err)
+	}
+
+	satToken := string(token) // convert token to a String
+
+	m.satToken = satToken
+	m.logger.Debugf("mqtte4k got SAT Token: %s", satToken)
 }
 
 func initSpiffeWorkloadApi(m *mqttPubSub) {
@@ -89,7 +103,11 @@ func (m *mqttPubSub) Init(metadata pubsub.Metadata) error {
 	}
 	m.metadata = mqttMeta
 
-	initSpiffeWorkloadApi(m)
+	if m.metadata.brokerAuthMethod == "SAT" {
+		populateSATPassword(m)
+	} else {
+		initSpiffeWorkloadApi(m)
+	}
 
 	p, err := m.connect()
 	if err != nil {
@@ -122,10 +140,10 @@ func (m *mqttPubSub) Publish(req *pubsub.PublishRequest) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if puback, err := m.client.Publish(ctx, &mqtt.Publish {
-		Topic: req.Topic,
-		QoS: m.metadata.qos,
-		Retain: m.metadata.retain,
+	if puback, err := m.client.Publish(ctx, &mqtt.Publish{
+		Topic:   req.Topic,
+		QoS:     m.metadata.qos,
+		Retain:  m.metadata.retain,
 		Payload: []byte(req.Data),
 	}); err != nil {
 		m.logger.Debugf("mqtte4k error sending message on topic %s with data: %v", req.Topic, req.Data)
@@ -179,7 +197,8 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 			m.logger.Debugf("mqtte4k Successfully processed MQTTE4K message after it previously failed: %s/%d", mqttMsg.Topic, mqttMsg.PacketID)
 		}); err != nil {
 			m.logger.Errorf("mqtte4k Failed processing MQTTE4K message: %s/%d: %v", mqttMsg.Topic, mqttMsg.PacketID, err)
-		}})
+		}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -193,8 +212,8 @@ func (m *mqttPubSub) Subscribe(ctx context.Context, req pubsub.SubscribeRequest,
 	if err != nil {
 		m.logger.Debugf("mqtte4k failed to subscribe to topic %s with qos: %v", req.Topic, m.metadata.qos)
 		m.logger.Debugf("mqtte4k failed to subscribe ERROR: %s", err.Error())
-		if(suback != nil) {
-			m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+		if suback != nil {
+			m.logger.Debugf("mqtte4k SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons, suback.Properties)
 		}
 		m.logger.Errorf("mqtte4k Error: %s", err.Error())
 	}
@@ -210,8 +229,8 @@ func (m *mqttPubSub) connect() (*mqtt.Client, error) {
 	}
 
 	c := mqtt.NewClient(mqtt.ClientConfig{
-		Conn: conn,
-		EnableManualAcknowledgment : false,
+		Conn:                       conn,
+		EnableManualAcknowledgment: false,
 	})
 
 	cp := m.createClientOptions()
@@ -236,12 +255,22 @@ func (m *mqttPubSub) connect() (*mqtt.Client, error) {
 }
 
 func (m *mqttPubSub) createClientOptions() *mqtt.Connect {
+	var username string
+	var password []byte
+	if m.metadata.brokerAuthMethod == "SAT" {
+		username = "$sat"
+		password = []byte(m.satToken)
+	} else {
+		username = m.svid.ID.String()
+		password = []byte(m.svid.Marshal())
+	}
+
 	cp := &mqtt.Connect{
 		KeepAlive:  m.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(m.metadata.clientIdPrefix ,m.svid.ID.String()),
+		ClientID:   getMD5HashClientID(m.metadata.clientIdPrefix),
 		CleanStart: m.metadata.cleanSession,
-		Username:   m.svid.ID.String(),
-		Password:   []byte(m.svid.Marshal()),
+		Username:   username,
+		Password:   password,
 	}
 	return cp
 }
@@ -261,8 +290,8 @@ func (m *mqttPubSub) Features() []pubsub.Feature {
 	return nil
 }
 
-func getMD5HashClientID(clientID string, svidID string) string {
-	text := svidID + os.Getenv("POD_NAME")
+func getMD5HashClientID(clientID string) string {
+	text := os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
 
 	hexString := ""
