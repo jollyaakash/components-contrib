@@ -26,12 +26,13 @@ import (
 
 func getFakeProperties() map[string]string {
 	return map[string]string{
-		"consumerID":     "client",
-		mqttURL:          "tcp://fakeUser:fakePassword@fake.mqtt.host:1883",
-		mqttQOS:          "1",
-		mqttRetain:       "true",
-		mqttCleanSession: "false",
-		spiffeSocketPath: "spiffeSocketPath",
+		"consumerID":         "client",
+		mqttURL:              "tcp://fakeUser:fakePassword@fake.mqtt.host:1883",
+		mqttQOS:              "1",
+		mqttRetain:           "true",
+		mqttCleanSession:     "false",
+		brokerAuthMethod:     "spiffe",
+		spiffeSocketPath:     "spiffeSocketPath",
 		spiffeBrokerAudience: "spiffeBrokerAudience",
 	}
 }
@@ -51,16 +52,6 @@ func TestParseMetadata(t *testing.T) {
 		assert.Equal(t, byte(1), m.qos)
 		assert.Equal(t, true, m.retain)
 		assert.Equal(t, false, m.cleanSession)
-	})
-
-	t.Run("missing consumerID", func(t *testing.T) {
-		fakeProperties := getFakeProperties()
-		fakeMetaData := pubsub.Metadata{Base: mdata.Base{Properties: fakeProperties}}
-		fakeMetaData.Properties["consumerID"] = ""
-		_, err := parseMQTTMetaData(fakeMetaData, log)
-
-		// assert
-		assert.Contains(t, err.Error(), "missing consumerID")
 	})
 
 	t.Run("url is not given", func(t *testing.T) {
