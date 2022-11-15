@@ -2,17 +2,18 @@ package e4k
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	jsoniter "github.com/json-iterator/go"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-	"crypto/md5"
-    "encoding/hex"
+
+	"github.com/google/uuid"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dapr/components-contrib/state"
@@ -44,15 +45,17 @@ const (
 	defaultKeepAliveDuration       = 30
 	defaultMqttResponseTopicPrefix = "response_topic"
 
-	// Spiffe keys.
+	// Auth keys.
+	brokerAuthMethod     = "brokerAuthMethod"
+	satTokenPath         = "satTokenPath"
 	spiffeSocketPath     = "spiffeSocketPath"
 	spiffeBrokerAudience = "spiffeBrokerAudience"
 
-	// defaultClientID prefix 
+	// defaultClientID prefix
 	clientIdPrefix = "e4kd-"
 
 	// errors.
-	errorMsgPrefix = "e4k statestore error:"
+	errorMsgPrefix      = "e4k statestore error:"
 	mqttResponseTimeout = 200
 )
 
@@ -64,6 +67,7 @@ type StateStore struct {
 	cancel           context.CancelFunc
 	backOff          backoff.BackOff
 	svid             *jwtsvid.SVID
+	satToken         string
 	ctx              context.Context
 	correlationMap   map[string]bool
 	responsesChannel chan *mqtt.Publish
@@ -80,6 +84,8 @@ type e4kMetadata struct {
 	cleanSession         bool
 	backOffMaxRetries    int
 	keepAliveDuration    uint16
+	brokerAuthMethod     string
+	satTokenPath         string
 	spiffeSocketPath     string
 	spiffeBrokerAudience string
 	responseTopic        string
@@ -93,6 +99,18 @@ func NewAzureE4KStore(logger logger.Logger) state.Store {
 	s.DefaultBulkStore = state.NewDefaultBulkStore(s)
 
 	return s
+}
+
+func populateSATPassword(r *StateStore) {
+	token, err := os.ReadFile(r.metadata.satTokenPath)
+	if err != nil {
+		panic(err)
+	}
+
+	satToken := string(token) // convert token to a String
+
+	r.satToken = satToken
+	r.logger.Debugf("mqtte4k got SAT Token: %s", satToken)
 }
 
 func initSpiffeWorkloadApi(r *StateStore) {
@@ -151,13 +169,22 @@ func (r *StateStore) connect() (*mqtt.Client, error) {
 }
 
 func (r *StateStore) createClientOptions() *mqtt.Connect {
+	var username string
+	var password []byte
+	if r.metadata.brokerAuthMethod == "SAT" {
+		username = "$sat"
+		password = []byte(r.satToken)
+	} else {
+		username = r.svid.ID.String()
+		password = []byte(r.svid.Marshal())
+	}
 
 	cp := &mqtt.Connect{
 		KeepAlive:  r.metadata.keepAliveDuration,
-		ClientID:   getMD5HashClientID(r.metadata.clientIdPrefix ,r.svid.ID.String()),
+		ClientID:   getMD5HashClientID(r.metadata.clientIdPrefix),
 		CleanStart: r.metadata.cleanSession,
-		Username:   r.svid.ID.String(),
-		Password:   []byte(r.svid.Marshal()),
+		Username:   username,
+		Password:   password,
 	}
 	return cp
 }
@@ -193,8 +220,8 @@ func (r *StateStore) subscribeResponseTopic() error {
 		r.logger.Debugf("e4k state store failed to subscribe to response topic %s with qos: %v", r.metadata.responseTopic, r.metadata.qos)
 		r.logger.Debugf("e4k state store failed to subscribe ERROR: %s", err.Error())
 
-		if(suback != nil) {
-			r.logger.Debugf("e4k state store SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons,suback.Properties)
+		if suback != nil {
+			r.logger.Debugf("e4k state store SUBACK: ReasonCode:%v Properties:\n%s", suback.Reasons, suback.Properties)
 		}
 		r.logger.Errorf("e4k state store Error: %s", err.Error())
 		return err
@@ -214,7 +241,11 @@ func (r *StateStore) Init(metadata state.Metadata) error {
 
 	r.metadata = meta
 
-	initSpiffeWorkloadApi(r)
+	if r.metadata.brokerAuthMethod == "SAT" {
+		populateSATPassword(r)
+	} else {
+		initSpiffeWorkloadApi(r)
+	}
 
 	p, err := r.connect()
 	if err != nil {
@@ -262,7 +293,7 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 
 	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
-		QoS: r.metadata.qos,
+		QoS:        r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
@@ -321,7 +352,7 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 
 	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
-		QoS: r.metadata.qos,
+		QoS:        r.metadata.qos,
 		Payload:    make([]byte, 0),
 		Properties: props,
 	}); err != nil {
@@ -397,7 +428,7 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 
 	if puback, err := r.client.Publish(ctx, &mqtt.Publish{
 		Topic:      pub_topic,
-		QoS: r.metadata.qos,
+		QoS:        r.metadata.qos,
 		Payload:    r.marshal(req),
 		Properties: props,
 	}); err != nil {
@@ -440,16 +471,28 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
 
-	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
-		m.spiffeSocketPath = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
-	}
+	if val, ok := md.Properties[brokerAuthMethod]; ok && val == "spiffe" {
+		m.brokerAuthMethod = "spiffe"
+		if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
+			m.spiffeSocketPath = val
 
-	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
-		m.spiffeBrokerAudience = val
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
+		}
+
+		if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
+			m.spiffeBrokerAudience = val
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+		}
 	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+		m.brokerAuthMethod = "SAT"
+		if val, ok := md.Properties[satTokenPath]; ok && val != "" {
+			m.satTokenPath = val
+
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing satTokenPath", errorMsgPrefix)
+		}
 	}
 
 	// optional configuration settings
@@ -515,8 +558,8 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 	return &m, nil
 }
 
-func getMD5HashClientID(clientID string, svidID string) string {
-	text := svidID + os.Getenv("POD_NAME")
+func getMD5HashClientID(clientID string) string {
+	text := os.Getenv("POD_NAME")
 	hash := md5.Sum([]byte(text))
 
 	hexString := ""

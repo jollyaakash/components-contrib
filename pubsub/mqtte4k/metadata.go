@@ -74,10 +74,11 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 	} else {
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
+
 	if val, ok := md.Properties[brokerAuthMethod]; ok && val == "spiffe" {
+		m.brokerAuthMethod = "spiffe"
 		if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
 			m.spiffeSocketPath = val
-			m.brokerAuthMethod = "spiffe"
 		} else {
 			return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
 		}
@@ -88,9 +89,9 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 			return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
 		}
 	} else {
+		m.brokerAuthMethod = "SAT"
 		if val, ok := md.Properties[satTokenPath]; ok && val != "" {
 			m.satTokenPath = val
-			m.brokerAuthMethod = "SAT"
 		} else {
 			return &m, fmt.Errorf("%s Invalid or Missing satTokenPath", errorMsgPrefix)
 		}
