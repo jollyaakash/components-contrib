@@ -104,7 +104,7 @@ func NewAzureE4KStore(logger logger.Logger) state.Store {
 func populateSATPassword(r *StateStore) {
 	token, err := os.ReadFile(r.metadata.satTokenPath)
 	if err != nil {
-		panic(err)
+		panic("failed to read SAT from Token Path Are volume-mount annotations provided?")
 	}
 
 	satToken := string(token) // convert token to a String

@@ -18,7 +18,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"time"
@@ -62,17 +61,16 @@ func NewMQTTE4KPubSub(logger logger.Logger) pubsub.PubSub {
 	}
 }
 
-func populateSATPassword(m *mqttPubSub) error {
+func populateSATPassword(m *mqttPubSub) {
 	token, err := os.ReadFile(m.metadata.satTokenPath)
 	if err != nil {
-		return fmt.Errorf("failed to read SAT from Token Path %s. Are volume-mount annotations provided?", m.metadata.satTokenPath)
+		panic("failed to read SAT from Token Path Are volume-mount annotations provided?")
 	}
 
 	satToken := string(token) // convert token to a String
 
 	m.satToken = satToken
 	m.logger.Debugf("mqtte4k got SAT Token")
-	return err
 }
 
 func initSpiffeWorkloadApi(m *mqttPubSub) {
