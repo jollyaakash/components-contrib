@@ -110,7 +110,7 @@ func populateSATPassword(r *StateStore) {
 	satToken := string(token) // convert token to a String
 
 	r.satToken = satToken
-	r.logger.Debugf("mqtte4k got SAT Token: %s", satToken)
+	r.logger.Debugf("mqtte4k got SAT Token")
 }
 
 func initSpiffeWorkloadApi(r *StateStore) {

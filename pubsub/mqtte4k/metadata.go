@@ -98,7 +98,6 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 	}
 
 	// optional configuration settings
-	// make this mandatory
 	if val, ok := md.Properties[mqttClientIdPrefix]; ok && val != "" {
 		m.clientIdPrefix = val
 	} else {
