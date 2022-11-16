@@ -64,7 +64,7 @@ func NewMQTTE4KPubSub(logger logger.Logger) pubsub.PubSub {
 func populateSATPassword(m *mqttPubSub) {
 	token, err := os.ReadFile(m.metadata.satTokenPath)
 	if err != nil {
-		panic("failed to read SAT from Token Path Are volume-mount annotations provided?")
+		panic("failed to read SAT from Token file path. Are volume-mount annotations provided?")
 	}
 
 	satToken := string(token) // convert token to a String
