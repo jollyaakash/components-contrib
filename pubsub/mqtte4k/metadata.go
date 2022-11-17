@@ -24,14 +24,16 @@ import (
 )
 
 type metadata struct {
-	url               string
-	clientIdPrefix    string
-	qos               byte
-	retain            bool
-	cleanSession      bool
-	backOffMaxRetries int
-	keepAliveDuration uint16
-	spiffeSocketPath  string
+	url                  string
+	clientIdPrefix       string
+	qos                  byte
+	retain               bool
+	cleanSession         bool
+	backOffMaxRetries    int
+	keepAliveDuration    uint16
+	brokerAuthMethod     string
+	satTokenPath         string
+	spiffeSocketPath     string
 	spiffeBrokerAudience string
 }
 
@@ -53,11 +55,13 @@ const (
 	defaultCleanSession      = true
 	defaultKeepAliveDuration = 30
 
-	// Spiffe keys.
-	spiffeSocketPath = "spiffeSocketPath"
+	//E4K keys
+	brokerAuthMethod     = "brokerAuthMethod"
+	satTokenPath         = "satTokenPath"
+	spiffeSocketPath     = "spiffeSocketPath"
 	spiffeBrokerAudience = "spiffeBrokerAudience"
 
-	// defaultClientID prefix 
+	// defaultClientID prefix
 	clientIdPrefix = "e4kd-"
 )
 
@@ -71,20 +75,29 @@ func parseMQTTMetaData(md pubsub.Metadata, log logger.Logger) (*metadata, error)
 		return &m, fmt.Errorf("%s missing url", errorMsgPrefix)
 	}
 
-	if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
-		m.spiffeSocketPath = val
-	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
-	}
+	if val, ok := md.Properties[brokerAuthMethod]; ok && val == "spiffe" {
+		m.brokerAuthMethod = "spiffe"
+		if val, ok := md.Properties[spiffeSocketPath]; ok && val != "" {
+			m.spiffeSocketPath = val
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing spiffeSocketPath", errorMsgPrefix)
+		}
 
-	if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
-		m.spiffeBrokerAudience = val
+		if val, ok := md.Properties[spiffeBrokerAudience]; ok && val != "" {
+			m.spiffeBrokerAudience = val
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+		}
 	} else {
-		return &m, fmt.Errorf("%s Invalid or Missing spiffeBrokerAudience", errorMsgPrefix)
+		m.brokerAuthMethod = "SAT"
+		if val, ok := md.Properties[satTokenPath]; ok && val != "" {
+			m.satTokenPath = val
+		} else {
+			return &m, fmt.Errorf("%s Invalid or Missing satTokenPath", errorMsgPrefix)
+		}
 	}
 
 	// optional configuration settings
-
 	if val, ok := md.Properties[mqttClientIdPrefix]; ok && val != "" {
 		m.clientIdPrefix = val
 	} else {
