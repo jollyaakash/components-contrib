@@ -15,14 +15,18 @@ package appconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azappconfig"
+	"github.com/google/uuid"
 
 	"github.com/dapr/components-contrib/configuration"
 	azauth "github.com/dapr/components-contrib/internal/authentication/azure"
@@ -31,20 +35,30 @@ import (
 )
 
 const (
-	host                 = "appConfigHost"
-	connectionString     = "appConfigConnectionString"
-	maxRetries           = "maxRetries"
-	retryDelay           = "retryDelay"
-	maxRetryDelay        = "maxRetryDelay"
-	defaultMaxRetries    = 3
-	defaultRetryDelay    = time.Second * 4
-	defaultMaxRetryDelay = time.Second * 120
+	host                         = "host"
+	connectionString             = "connectionString"
+	maxRetries                   = "maxRetries"
+	retryDelay                   = "retryDelay"
+	maxRetryDelay                = "maxRetryDelay"
+	subscribePollInterval        = "subscribePollInterval"
+	requestTimeout               = "requestTimeout"
+	defaultMaxRetries            = 3
+	defaultRetryDelay            = time.Second * 4
+	defaultMaxRetryDelay         = time.Second * 120
+	defaultSubscribePollInterval = time.Hour * 24
+	defaultRequestTimeout        = time.Second * 15
 )
+
+type azAppConfigClient interface {
+	GetSetting(ctx context.Context, key string, options *azappconfig.GetSettingOptions) (azappconfig.GetSettingResponse, error)
+	NewListSettingsPager(selector azappconfig.SettingSelector, options *azappconfig.ListSettingsOptions) *runtime.Pager[azappconfig.ListSettingsPage]
+}
 
 // ConfigurationStore is a Azure App Configuration store.
 type ConfigurationStore struct {
-	client   *azappconfig.Client
-	metadata metadata
+	client                azAppConfigClient
+	metadata              metadata
+	subscribeCancelCtxMap sync.Map
 
 	logger logger.Logger
 }
@@ -131,7 +145,7 @@ func parseMetadata(meta configuration.Metadata) (metadata, error) {
 	if val, ok := meta.Properties[maxRetries]; ok && val != "" {
 		parsedVal, err := strconv.Atoi(val)
 		if err != nil {
-			return m, fmt.Errorf("azure appconfig error: can't parse maxRetries field: %s", err)
+			return m, fmt.Errorf("azure appconfig error: can't parse maxRetries field: %w", err)
 		}
 		m.maxRetries = parsedVal
 	}
@@ -140,7 +154,7 @@ func parseMetadata(meta configuration.Metadata) (metadata, error) {
 	if val, ok := meta.Properties[maxRetryDelay]; ok && val != "" {
 		parsedVal, err := strconv.Atoi(val)
 		if err != nil {
-			return m, fmt.Errorf("azure appconfig error: can't parse maxRetryDelay field: %s", err)
+			return m, fmt.Errorf("azure appconfig error: can't parse maxRetryDelay field: %w", err)
 		}
 		m.maxRetryDelay = time.Duration(parsedVal)
 	}
@@ -149,9 +163,27 @@ func parseMetadata(meta configuration.Metadata) (metadata, error) {
 	if val, ok := meta.Properties[retryDelay]; ok && val != "" {
 		parsedVal, err := strconv.Atoi(val)
 		if err != nil {
-			return m, fmt.Errorf("azure appconfig error: can't parse retryDelay field: %s", err)
+			return m, fmt.Errorf("azure appconfig error: can't parse retryDelay field: %w", err)
 		}
 		m.retryDelay = time.Duration(parsedVal)
+	}
+
+	m.subscribePollInterval = defaultSubscribePollInterval
+	if val, ok := meta.Properties[subscribePollInterval]; ok && val != "" {
+		parsedVal, err := strconv.Atoi(val)
+		if err != nil {
+			return m, fmt.Errorf("azure appconfig error: can't parse subscribePollInterval field: %w", err)
+		}
+		m.subscribePollInterval = time.Duration(parsedVal)
+	}
+
+	m.requestTimeout = defaultRequestTimeout
+	if val, ok := meta.Properties[requestTimeout]; ok && val != "" {
+		parsedVal, err := strconv.Atoi(val)
+		if err != nil {
+			return m, fmt.Errorf("azure appconfig error: can't parse requestTimeout field: %w", err)
+		}
+		m.requestTimeout = time.Duration(parsedVal)
 	}
 
 	return m, nil
@@ -163,18 +195,19 @@ func (r *ConfigurationStore) Get(ctx context.Context, req *configuration.GetRequ
 
 	if len(keys) == 0 {
 		var err error
-		if items, err = r.getAll(ctx); err != nil {
+		if items, err = r.getAll(ctx, req); err != nil {
 			return &configuration.GetResponse{}, err
 		}
 	} else {
 		items = make(map[string]*configuration.Item, len(keys))
 		for _, key := range keys {
-			resp, err := r.client.GetSetting(
+			resp, err := r.getSettings(
 				ctx,
 				key,
 				&azappconfig.GetSettingOptions{
-					Label: to.Ptr("*"),
-				})
+					Label: r.getLabelFromMetadata(req.Metadata),
+				},
+			)
 			if err != nil {
 				return &configuration.GetResponse{}, err
 			}
@@ -190,25 +223,31 @@ func (r *ConfigurationStore) Get(ctx context.Context, req *configuration.GetRequ
 			items[key] = item
 		}
 	}
-
 	return &configuration.GetResponse{
 		Items: items,
 	}, nil
 }
 
-func (r *ConfigurationStore) getAll(ctx context.Context) (map[string]*configuration.Item, error) {
+func (r *ConfigurationStore) getAll(ctx context.Context, req *configuration.GetRequest) (map[string]*configuration.Item, error) {
 	items := make(map[string]*configuration.Item, 0)
 
-	revPgr := r.client.NewListRevisionsPager(
+	labelFilter := r.getLabelFromMetadata(req.Metadata)
+	if labelFilter == nil {
+		labelFilter = to.Ptr("*")
+	}
+
+	allSettingsPgr := r.client.NewListSettingsPager(
 		azappconfig.SettingSelector{
 			KeyFilter:   to.Ptr("*"),
-			LabelFilter: to.Ptr("*"),
+			LabelFilter: labelFilter,
 			Fields:      azappconfig.AllSettingFields(),
 		},
 		nil)
 
-	for revPgr.More() {
-		if revResp, err := revPgr.NextPage(ctx); err == nil {
+	for allSettingsPgr.More() {
+		timeoutContext, cancel := context.WithTimeout(ctx, r.metadata.requestTimeout)
+		defer cancel()
+		if revResp, err := allSettingsPgr.NextPage(timeoutContext); err == nil {
 			for _, setting := range revResp.Settings {
 				item := &configuration.Item{
 					Metadata: map[string]string{},
@@ -221,17 +260,108 @@ func (r *ConfigurationStore) getAll(ctx context.Context) (map[string]*configurat
 				items[*setting.Key] = item
 			}
 		} else {
-			return nil, fmt.Errorf("failed to load all keys, error is %s", err)
+			return nil, fmt.Errorf("failed to load all keys, error is %w", err)
 		}
 	}
-
 	return items, nil
 }
 
+func (r *ConfigurationStore) getLabelFromMetadata(metadata map[string]string) *string {
+	if s, ok := metadata["label"]; ok && s != "" {
+		return to.Ptr(s)
+	}
+
+	return nil
+}
+
 func (r *ConfigurationStore) Subscribe(ctx context.Context, req *configuration.SubscribeRequest, handler configuration.UpdateHandler) (string, error) {
-	return "", fmt.Errorf("Subscribe is not implemented by this configuration store")
+	sentinelKey := r.getSentinelKeyFromMetadata(req.Metadata)
+	if sentinelKey == "" {
+		return "", fmt.Errorf("azure appconfig error: sentinel key is not provided in metadata")
+	}
+	uuid, err := uuid.NewRandom()
+	if err != nil {
+		return "", fmt.Errorf("azure appconfig error: failed to generate uuid, error is %w", err)
+	}
+	subscribeID := uuid.String()
+	childContext, cancel := context.WithCancel(ctx)
+	r.subscribeCancelCtxMap.Store(subscribeID, cancel)
+	go r.doSubscribe(childContext, req, handler, sentinelKey, subscribeID)
+	return subscribeID, nil
+}
+
+func (r *ConfigurationStore) doSubscribe(ctx context.Context, req *configuration.SubscribeRequest, handler configuration.UpdateHandler, sentinelKey string, id string) {
+	var etagVal *azcore.ETag
+	for {
+		// get sentinel key changes.
+		resp, err := r.getSettings(
+			ctx,
+			sentinelKey,
+			&azappconfig.GetSettingOptions{
+				Label:         r.getLabelFromMetadata(req.Metadata),
+				OnlyIfChanged: etagVal,
+			},
+		)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			r.logger.Debugf("azure appconfig error: fail to get sentinel key or sentinel's key %s value is unchanged: %s", sentinelKey, err)
+		} else {
+			// if sentinel key has changed then update the Etag value.
+			etagVal = resp.ETag
+			items, err := r.Get(ctx, &configuration.GetRequest{
+				Keys:     req.Keys,
+				Metadata: req.Metadata,
+			})
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				r.logger.Errorf("azure appconfig error: fail to get configuration key changes: %s", err)
+			} else {
+				r.handleSubscribedChange(ctx, handler, items, id)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(r.metadata.subscribePollInterval):
+		}
+	}
+}
+
+func (r *ConfigurationStore) getSettings(ctx context.Context, key string, getSettingsOptions *azappconfig.GetSettingOptions) (azappconfig.GetSettingResponse, error) {
+	timeoutContext, cancel := context.WithTimeout(ctx, r.metadata.requestTimeout)
+	defer cancel()
+	resp, err := r.client.GetSetting(timeoutContext, key, getSettingsOptions)
+	return resp, err
+}
+
+func (r *ConfigurationStore) handleSubscribedChange(ctx context.Context, handler configuration.UpdateHandler, items *configuration.GetResponse, id string) {
+	e := &configuration.UpdateEvent{
+		Items: items.Items,
+		ID:    id,
+	}
+	err := handler(ctx, e)
+	if err != nil {
+		r.logger.Errorf("azure appconfig error: fail to call handler to notify event for configuration update subscribe: %s", err)
+	}
+}
+
+func (r *ConfigurationStore) getSentinelKeyFromMetadata(metadata map[string]string) string {
+	if s, ok := metadata["sentinelKey"]; ok && s != "" {
+		return s
+	}
+	return ""
 }
 
 func (r *ConfigurationStore) Unsubscribe(ctx context.Context, req *configuration.UnsubscribeRequest) error {
-	return fmt.Errorf("Unsubscribe is not implemented by this configuration store")
+	if cancelContext, ok := r.subscribeCancelCtxMap.Load(req.ID); ok {
+		// already exist subscription
+		r.subscribeCancelCtxMap.Delete(req.ID)
+		cancelContext.(context.CancelFunc)()
+		return nil
+	}
+	return fmt.Errorf("azure appconfig error: subscription with id %s does not exist", req.ID)
 }

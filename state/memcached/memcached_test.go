@@ -45,9 +45,9 @@ func TestMemcachedMetadata(t *testing.T) {
 		}
 		metadata, err := getMemcachedMetadata(m)
 		assert.Nil(t, err)
-		assert.Equal(t, properties["hosts"], metadata.hosts[0])
-		assert.Equal(t, defaultMaxIdleConnections, metadata.maxIdleConnections)
-		assert.Equal(t, defaultTimeout, metadata.timeout)
+		assert.Equal(t, properties["hosts"], metadata.Hosts[0])
+		assert.Equal(t, defaultMaxIdleConnections, metadata.MaxIdleConnections)
+		assert.Equal(t, -1, metadata.Timeout)
 	})
 
 	t.Run("with required configuration, multiple host", func(t *testing.T) {
@@ -60,9 +60,9 @@ func TestMemcachedMetadata(t *testing.T) {
 		split := strings.Split(properties["hosts"], ",")
 		metadata, err := getMemcachedMetadata(m)
 		assert.Nil(t, err)
-		assert.Equal(t, split, metadata.hosts)
-		assert.Equal(t, defaultMaxIdleConnections, metadata.maxIdleConnections)
-		assert.Equal(t, defaultTimeout, metadata.timeout)
+		assert.Equal(t, split, metadata.Hosts)
+		assert.Equal(t, defaultMaxIdleConnections, metadata.MaxIdleConnections)
+		assert.Equal(t, -1, metadata.Timeout)
 	})
 
 	t.Run("with optional configuration, multiple hosts", func(t *testing.T) {
@@ -77,9 +77,9 @@ func TestMemcachedMetadata(t *testing.T) {
 		split := strings.Split(properties["hosts"], ",")
 		metadata, err := getMemcachedMetadata(m)
 		assert.Nil(t, err)
-		assert.Equal(t, split, metadata.hosts)
-		assert.Equal(t, 10, metadata.maxIdleConnections)
-		assert.Equal(t, 5000*time.Millisecond, metadata.timeout)
+		assert.Equal(t, split, metadata.Hosts)
+		assert.Equal(t, 10, metadata.MaxIdleConnections)
+		assert.Equal(t, int(5000*time.Millisecond), metadata.Timeout*int(time.Millisecond))
 	})
 }
 
@@ -95,6 +95,16 @@ func TestParseTTL(t *testing.T) {
 
 		assert.NotNil(t, err, "tll is not an integer")
 		assert.Nil(t, ttl)
+	})
+	t.Run("TTL is a negative integer ends up translated to 0", func(t *testing.T) {
+		ttlInSeconds := -1
+		ttl, err := store.parseTTL(&state.SetRequest{
+			Metadata: map[string]string{
+				"ttlInSeconds": strconv.Itoa(ttlInSeconds),
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int(*ttl), 0)
 	})
 	t.Run("TTL specified with wrong key", func(t *testing.T) {
 		ttlInSeconds := 12345
