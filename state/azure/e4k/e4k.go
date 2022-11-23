@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ import (
 
 	metadata "github.com/dapr/components-contrib/metadata"
 	mqtt "github.com/eclipse/paho.golang/paho"
+
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
