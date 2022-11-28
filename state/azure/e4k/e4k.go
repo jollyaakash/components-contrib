@@ -570,7 +570,7 @@ func getE4KStorageMetadata(md state.Metadata) (*e4kMetadata, error) {
 		m.keepAliveDuration = uint16(keepAliveDurationInt)
 	}
 
-	topic_suffix := defaultMqttResponseTopicPrefix
+	topic_suffix := defaultMqttResponseTopicPrefix + uuid.New().String()
 	if val, ok := md.Properties[mqttResponseTopicPrefix]; ok && val != "" {
 		topic_suffix = val
 	}
